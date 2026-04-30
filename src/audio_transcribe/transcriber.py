@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,6 +41,11 @@ def _create_model(device: str):
     from funasr import AutoModel  # type: ignore[import-untyped]
 
     return AutoModel(model="iic/SenseVoiceSmall", vad_model="fsmn-vad", device=device)
+
+
+def _clean_sensevoice_text(text: str) -> str:
+    """Remove SenseVoice special tokens like <|zh|><|NEUTRAL|><|Speech|><|withitn|>."""
+    return re.sub(r"<\|[^|]*\|>", "", text).strip()
 
 
 def _parse_segments(timestamp_str: str | None, text: str) -> list[dict]:
@@ -105,7 +111,8 @@ def transcribe(
             return None
 
         first = results[0]
-        text = first.get("text", "")
+        raw_text = first.get("text", "")
+        text = _clean_sensevoice_text(raw_text)
         timestamp_str = first.get("timestamp")
 
         segments = _parse_segments(timestamp_str, text)

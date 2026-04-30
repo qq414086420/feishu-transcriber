@@ -15,6 +15,15 @@ class StepResult:
     error: str = ""
 
 
+def _last_line(text: str) -> str:
+    """Return the last non-empty line from multi-line stdout."""
+    for line in reversed(text.strip().splitlines()):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
 @dataclass(frozen=True)
 class PipelineStep:
     """A single step in the processing pipeline."""
@@ -37,7 +46,8 @@ class PipelineStep:
             return StepResult(success=False, error=f"{self.name} command not found")
 
         if result.returncode == 0:
-            return StepResult(success=True, output_path=result.stdout.strip())
+            output_path = _last_line(result.stdout)
+            return StepResult(success=True, output_path=output_path)
 
         error_msg = result.stderr.strip() or f"{self.name} exited with code {result.returncode}"
         return StepResult(success=False, error=error_msg)
@@ -65,7 +75,6 @@ def run_pipeline(
         d.mkdir(parents=True, exist_ok=True)
 
     src = Path(file_path)
-    stem = src.stem
     inbox_path = inbox_dir / src.name
 
     # Copy file to inbox if not already there
