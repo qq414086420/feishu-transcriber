@@ -18,6 +18,7 @@ def summarize(
     output_path: Path,
     api_key: str,
     custom_prompt: str | None = None,
+    style: str = "verbatim_summary",
 ) -> Path | None:
     """Summarize a transcript JSON file using Claude API.
 
@@ -29,7 +30,7 @@ def summarize(
 
     try:
         transcript_text = transcript_path.read_text(encoding="utf-8")
-        prompt = build_prompt(transcript_text, custom_prompt)
+        prompt = build_prompt(transcript_text, custom_prompt=custom_prompt, style=style)
 
         client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
         message = client.messages.create(

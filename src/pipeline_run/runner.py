@@ -59,6 +59,7 @@ def run_pipeline(
     python_cmd: str = "python",
     no_summarize: bool = False,
     cleanup: bool = False,
+    style: str = "verbatim_summary",
 ) -> dict:
     """Run the full transcription pipeline.
 
@@ -107,7 +108,7 @@ def run_pipeline(
     if not no_summarize:
         step3 = PipelineStep(
             "text_summarize",
-            [python_cmd, "-m", "text_summarize", "--input", transcript_path],
+            [python_cmd, "-m", "text_summarize", "--input", transcript_path, "--style", style],
         )
         r3 = step3.execute()
         if not r3.success:

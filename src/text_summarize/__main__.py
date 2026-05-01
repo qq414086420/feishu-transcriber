@@ -33,6 +33,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Custom prompt template with {transcript} placeholder",
     )
+    parser.add_argument(
+        "--style",
+        default="verbatim_summary",
+        help="Summary style template name (default: verbatim_summary)",
+    )
     return parser
 
 
@@ -56,6 +61,7 @@ def main() -> None:
         output_path=output_path,
         api_key=config.anthropic_api_key,
         custom_prompt=args.prompt,
+        style=args.style,
     )
 
     if result is None:

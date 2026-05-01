@@ -49,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the text-summarize step",
     )
+    parser.add_argument(
+        "--style",
+        default="verbatim_summary",
+        help="Summary style template name (default: verbatim_summary)",
+    )
 
     return parser
 
@@ -98,6 +103,7 @@ def main() -> None:
         python_cmd=python_cmd,
         no_summarize=args.no_summarize,
         cleanup=args.cleanup,
+        style=args.style,
     )
 
     print(json.dumps(result, ensure_ascii=False))
