@@ -8,7 +8,7 @@ from shared.config import Config
 from shared.exit_codes import EXIT_ARG_ERROR, EXIT_FAILURE, EXIT_OK
 from shared.logging import setup_tool_logging
 
-from audio_transcribe.transcriber import transcribe
+from audio_transcribe.transcriber import transcribe_with_speakers
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,7 +56,7 @@ def main() -> None:
 
     output_path = args.output or config.transcripts_dir / f"{input_path.stem}.json"
 
-    result = transcribe(
+    result = transcribe_with_speakers(
         input_path=input_path,
         output_path=output_path,
         language=args.language,

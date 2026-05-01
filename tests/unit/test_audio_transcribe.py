@@ -6,6 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from audio_transcribe.diarizer import DiarizationSegment
+from audio_transcribe.transcriber import transcribe, transcribe_with_speakers
+
 
 # ---------------------------------------------------------------------------
 # Tests for TranscriptionResult
@@ -178,4 +181,53 @@ class TestTranscribe:
         with patch("audio_transcribe.transcriber._create_model", side_effect=RuntimeError("GPU OOM")):
             result = transcribe(input_path, output_path)
 
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for transcribe_with_speakers function
+# ---------------------------------------------------------------------------
+class TestTranscribeWithSpeakers:
+    @patch("audio_transcribe.transcriber.diarize")
+    @patch("audio_transcribe.transcriber._create_model")
+    def test_returns_result_with_speakers(self, mock_model_cls, mock_diarize, tmp_path: Path):
+        input_wav = tmp_path / "test.wav"
+        input_wav.write_bytes(b"fake")
+
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{"text": "大家好", "timestamp": "0,5000"}]
+        mock_model_cls.return_value = mock_model
+
+        mock_diarize.return_value = [DiarizationSegment(start=0.0, end=5.0, speaker="spk0")]
+
+        output_path = tmp_path / "test.json"
+        result = transcribe_with_speakers(input_wav, output_path)
+
+        assert result is not None
+        data = json.loads(output_path.read_text())
+        assert "speakers" in data
+        assert "verbatim" in data
+        assert "spk0" in data["speakers"]
+
+    @patch("audio_transcribe.transcriber.diarize")
+    @patch("audio_transcribe.transcriber._create_model")
+    def test_diarization_failure_degrades(self, mock_model_cls, mock_diarize, tmp_path: Path):
+        input_wav = tmp_path / "test.wav"
+        input_wav.write_bytes(b"fake")
+
+        mock_model = MagicMock()
+        mock_model.generate.return_value = [{"text": "test", "timestamp": "0,1000"}]
+        mock_model_cls.return_value = mock_model
+
+        mock_diarize.return_value = []
+
+        output_path = tmp_path / "test.json"
+        result = transcribe_with_speakers(input_wav, output_path)
+
+        assert result is not None
+        data = json.loads(output_path.read_text())
+        assert data["segments"][0]["speaker"] == "UNKNOWN"
+
+    def test_missing_input_returns_none(self, tmp_path: Path):
+        result = transcribe_with_speakers(tmp_path / "missing.wav", tmp_path / "out.json")
         assert result is None

@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from audio_transcribe.aligner import align, build_verbatim
+from audio_transcribe.diarizer import diarize
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,6 +20,8 @@ class TranscriptionResult:
     segments: list[dict]
     language: str
     duration: float
+    speakers: tuple[str, ...] = ()
+    verbatim: str = ""
 
     def to_json(self, path: Path) -> None:
         """Write the transcription result to a JSON file."""
@@ -24,8 +29,10 @@ class TranscriptionResult:
         data = {
             "text": self.text,
             "segments": self.segments,
+            "speakers": list(self.speakers),
             "language": self.language,
             "duration": self.duration,
+            "verbatim": self.verbatim,
         }
         path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
@@ -137,3 +144,41 @@ def transcribe(
     except Exception:
         logger.exception("Transcription failed for %s", input_path)
         return None
+
+
+def transcribe_with_speakers(
+    input_path: Path,
+    output_path: Path,
+    language: str = "zh",
+    device: str = "cpu",
+) -> TranscriptionResult | None:
+    """Transcribe audio with speaker diarization.
+
+    Runs SenseVoice ASR + 3D-Speaker diarization, aligns results,
+    and outputs a verbatim transcript with speaker labels.
+
+    Falls back to UNKNOWN speakers if diarization fails.
+    """
+    asr_result = transcribe(input_path, output_path, language=language, device=device)
+    if asr_result is None:
+        return None
+
+    diarization_segments = diarize(input_path, device=device)
+    aligned = align(asr_result.segments, diarization_segments)
+
+    speakers = tuple(sorted({seg["speaker"] for seg in aligned}))
+    verbatim = build_verbatim(aligned)
+    duration = aligned[-1]["end"] if aligned and aligned[-1].get("end") is not None else asr_result.duration
+
+    enriched = TranscriptionResult(
+        text=asr_result.text,
+        segments=aligned,
+        language=asr_result.language,
+        duration=duration,
+        speakers=speakers,
+        verbatim=verbatim,
+    )
+
+    enriched.to_json(output_path)
+    logger.info("Transcription with speakers saved to %s (%d speakers)", output_path, len(speakers))
+    return enriched
