@@ -11,6 +11,7 @@
 ## ✨ 特性
 
 - **端到端管线**：一条命令完成「媒体文件 → 会议纪要 Markdown」。
+- **无需飞书也能跑**：飞书只是可选输入源，纯本地文件转换不需要任何飞书配置或凭证。
 - **中文 ASR**：基于 [FunASR](https://github.com/modelscope/FunASR) 的 SenseVoice（`iic/SenseVoiceSmall`），中文识别效果优秀。
 - **说话人分离**：3D-Speaker（CAM++）做 diarization，再按时间戳与 ASR 结果对齐，输出**带说话人标注的逐字稿**。
 - **VAD 分块转写**：用 fsmn-vad 切分语音段落，得到准确的句级时间戳，提升说话人对齐质量。
@@ -78,6 +79,8 @@ cp .env.example .env             # 然后填入真实凭证（见下表）
 | `DATA_DIR` | 否 | 数据目录，默认 `./data` |
 | `LOGS_DIR` | 否 | 日志目录，默认 `./logs` |
 
+> 纯本地模式可只配 `ANTHROPIC_API_KEY`；用 `--no-summarize` 只转写时连 `.env` 都可以不建——见下方「纯本地使用」一节。
+
 ---
 
 ## 📖 使用
@@ -136,6 +139,37 @@ python -m text_summarize --input data/transcripts/a.json --style verbatim_summar
 ```
 
 > 💡 **GPU 加速**：一键管线目前默认用 **CPU** 转写。如需 GPU，请单独运行 `audio_transcribe --device cuda` 完成转写，再跑 `text_summarize` 生成纪要。
+
+---
+
+## 🏠 纯本地使用（脱离飞书）
+
+飞书只是**一个可选的输入来源**（在线下载模式）。核心转写链路与飞书完全解耦——只要不传 `--message-id`，飞书模块就不会被加载（惰性 import）。因此纯本地场景下，`FEISHU_APP_ID` / `FEISHU_APP_SECRET` 可以留空或删掉。
+
+### 最小配置（按需递减）
+
+| 想要的功能 | `.env` 里需要 | 联网需求 |
+|---|---|---|
+| 转写 + 生成纪要 | `ANTHROPIC_API_KEY` | 首次下载模型 + 调用 Claude |
+| **只转写、不出纪要** | **什么都不用**（可不建 `.env`） | 仅首次下载模型 |
+
+### 纯转写、零外部 API
+
+给本地文件加 `--no-summarize` 即可跳过 Claude 这一步——不读取 Anthropic key，连 `.env` 都可以不建：
+
+```bash
+python -m pipeline_run --file-path recording.mp3 --no-summarize
+# 产物：data/transcripts/recording.json（含完整文本 + 带时间戳/说话人的逐字稿）
+```
+
+只跑「转码 + 转写」两步，就是一个**完全离线、不碰飞书、不调用任何 LLM** 的本地语音转文字工具：
+
+```bash
+python -m media_to_audio   --input recording.mp4
+python -m audio_transcribe --input data/audio/recording.wav --device cuda   # 有 N 卡走 GPU，否则去掉 --device
+```
+
+> ⚠️ **首次运行会下载模型**（不是飞书，是权重文件）：从 ModelScope 拉取 ASR（SenseVoiceSmall）、VAD（fsmn-vad）、说话人分离（3D-Speaker CAM++）。下载一次后本地缓存，此后纯离线运行。
 
 ---
 
