@@ -3,6 +3,8 @@
 import json
 import logging
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -146,6 +148,103 @@ def transcribe(
         return None
 
 
+def _run_vad(input_path: Path, device: str) -> list[tuple[float, float]]:
+    """Run fsmn-vad to get speech segment boundaries in seconds.
+
+    Returns list of (start_sec, end_sec) pairs. Returns empty list on failure.
+    """
+    from funasr import AutoModel  # type: ignore[import-untyped]
+
+    vad_model = AutoModel(model="fsmn-vad", device=device)
+    results = vad_model.generate(input=str(input_path))
+    if not results:
+        return []
+    value = results[0].get("value", [])
+    if not value:
+        return []
+    return [(pair[0] / 1000.0, pair[1] / 1000.0) for pair in value]
+
+
+def _extract_chunk(input_path: Path, start: float, end: float, output_path: Path) -> None:
+    """Extract a chunk of audio using ffmpeg (fast seek)."""
+    duration = end - start
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-ss", str(start),
+            "-i", str(input_path),
+            "-t", str(duration),
+            "-ar", "16000", "-ac", "1",
+            str(output_path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+
+def _transcribe_chunked(
+    input_path: Path,
+    language: str,
+    device: str,
+) -> TranscriptionResult | None:
+    """VAD-based chunked transcription producing timestamped segments.
+
+    Splits audio using fsmn-vad, transcribes each chunk with SenseVoice,
+    and returns segments with real timestamps suitable for speaker alignment.
+    """
+    try:
+        vad_boundaries = _run_vad(input_path, device)
+    except Exception:
+        logger.exception("VAD failed for %s", input_path)
+        return None
+
+    if not vad_boundaries:
+        return TranscriptionResult(
+            text="", segments=[], language=language, duration=0.0,
+        )
+
+    try:
+        model = _create_model(device)
+    except Exception:
+        logger.exception("Model creation failed for chunked transcription")
+        return None
+
+    all_segments: list[dict] = []
+    all_text: list[str] = []
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for i, (start, end) in enumerate(vad_boundaries):
+            chunk_path = Path(tmp_dir) / f"chunk_{i:04d}.wav"
+            try:
+                _extract_chunk(input_path, start, end, chunk_path)
+            except subprocess.CalledProcessError:
+                logger.warning("Failed to extract chunk %d (%.1f-%.1f)s", i, start, end)
+                continue
+
+            try:
+                results = model.generate(
+                    input=str(chunk_path), language=language, use_itn=True,
+                )
+            except Exception:
+                logger.warning("Transcription failed for chunk %d", i)
+                continue
+
+            if results and results[0].get("text"):
+                text = _clean_sensevoice_text(results[0]["text"])
+                if text:
+                    all_segments.append({"start": start, "end": end, "text": text})
+                    all_text.append(text)
+
+    full_text = "".join(all_text)
+    duration = vad_boundaries[-1][1]
+
+    return TranscriptionResult(
+        text=full_text,
+        segments=all_segments,
+        language=language,
+        duration=duration,
+    )
+
+
 def transcribe_with_speakers(
     input_path: Path,
     output_path: Path,
@@ -154,12 +253,16 @@ def transcribe_with_speakers(
 ) -> TranscriptionResult | None:
     """Transcribe audio with speaker diarization.
 
-    Runs SenseVoice ASR + 3D-Speaker diarization, aligns results,
-    and outputs a verbatim transcript with speaker labels.
+    Uses VAD-based chunked transcription for accurate timestamps,
+    then runs 3D-Speaker diarization and aligns results.
 
     Falls back to UNKNOWN speakers if diarization fails.
     """
-    asr_result = transcribe(input_path, output_path, language=language, device=device)
+    if not input_path.exists():
+        logger.error("Input file not found: %s", input_path)
+        return None
+
+    asr_result = _transcribe_chunked(input_path, language, device)
     if asr_result is None:
         return None
 

@@ -31,29 +31,19 @@ def _create_diarization_pipeline(device: str):
     )
 
 
-def _parse_rttm(rttm_text: str) -> list[DiarizationSegment]:
-    """Parse RTTM format text into DiarizationSegment objects.
+def _parse_diarization_output(raw_segments: list) -> list[DiarizationSegment]:
+    """Parse diarization output into DiarizationSegment objects.
 
-    RTTM format per line:
-        SPEAKER <name> <channel> <start> <duration> <NA> <NA> <speaker_id> <NA> <NA>
+    Output format: [[start, end, speaker_id], ...] where times are in seconds.
     """
     segments: list[DiarizationSegment] = []
-    for line in rttm_text.strip().splitlines():
-        if not line.startswith("SPEAKER"):
+    for item in raw_segments:
+        if len(item) < 3:
             continue
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-        start = float(parts[3])
-        duration = float(parts[4])
-        speaker_id = parts[7] if len(parts) > 7 else "unknown"
-        segments.append(
-            DiarizationSegment(
-                start=start,
-                end=start + duration,
-                speaker=speaker_id,
-            )
-        )
+        start = float(item[0])
+        end = float(item[1])
+        speaker = f"SPEAKER_{item[2]:02d}"
+        segments.append(DiarizationSegment(start=start, end=end, speaker=speaker))
     return segments
 
 
@@ -64,11 +54,11 @@ def diarize(input_path: Path, device: str = "cuda") -> list[DiarizationSegment]:
     """
     try:
         pipeline = _create_diarization_pipeline(device)
-        result = pipeline(input=str(input_path))
-        rttm_text = result.get("text", "")
-        if not rttm_text:
+        result = pipeline(audio=str(input_path))
+        raw_segments = result.get("text", [])
+        if not raw_segments:
             return []
-        return _parse_rttm(rttm_text)
+        return _parse_diarization_output(raw_segments)
     except Exception:
         logger.exception("Diarization failed for %s", input_path)
         return []

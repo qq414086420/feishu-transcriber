@@ -7,3 +7,10 @@ logs/
 .env
 .coverage
 .pytest_cache/
+
+# Test fixtures — large binary audio/video, keep local only
+tests/*.wav
+tests/*.mp3
+tests/*.mp4
+tests/*.m4a
+tests/*.flac

@@ -185,18 +185,84 @@ class TestTranscribe:
 
 
 # ---------------------------------------------------------------------------
+# Tests for _transcribe_chunked function
+# ---------------------------------------------------------------------------
+class TestTranscribeChunked:
+    """Tests for VAD-based chunked transcription."""
+
+    @patch("audio_transcribe.transcriber._extract_chunk")
+    @patch("audio_transcribe.transcriber._create_model")
+    @patch("audio_transcribe.transcriber._run_vad")
+    def test_returns_timestamped_segments(self, mock_vad, mock_model_cls, mock_extract, tmp_path: Path):
+        mock_vad.return_value = [(0.0, 5.0), (5.5, 10.0)]
+
+        mock_model = MagicMock()
+        mock_model.generate.side_effect = [
+            [{"text": "你好"}],
+            [{"text": "世界"}],
+        ]
+        mock_model_cls.return_value = mock_model
+
+        input_path = tmp_path / "test.wav"
+        input_path.write_bytes(b"fake")
+
+        from audio_transcribe.transcriber import _transcribe_chunked
+        result = _transcribe_chunked(input_path, "zh", "cpu")
+
+        assert result is not None
+        assert result.text == "你好世界"
+        assert len(result.segments) == 2
+        assert result.segments[0]["start"] == 0.0
+        assert result.segments[0]["end"] == 5.0
+        assert result.segments[0]["text"] == "你好"
+        assert result.segments[1]["start"] == 5.5
+        assert result.segments[1]["text"] == "世界"
+
+    @patch("audio_transcribe.transcriber._run_vad")
+    def test_empty_vad_returns_empty_result(self, mock_vad, tmp_path: Path):
+        mock_vad.return_value = []
+
+        input_path = tmp_path / "test.wav"
+        input_path.write_bytes(b"fake")
+
+        from audio_transcribe.transcriber import _transcribe_chunked
+        result = _transcribe_chunked(input_path, "zh", "cpu")
+
+        assert result is not None
+        assert result.text == ""
+        assert result.segments == []
+
+    @patch("audio_transcribe.transcriber._run_vad")
+    def test_vad_failure_returns_none(self, mock_vad, tmp_path: Path):
+        mock_vad.side_effect = RuntimeError("VAD crashed")
+
+        input_path = tmp_path / "test.wav"
+        input_path.write_bytes(b"fake")
+
+        from audio_transcribe.transcriber import _transcribe_chunked
+        result = _transcribe_chunked(input_path, "zh", "cpu")
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
 # Tests for transcribe_with_speakers function
 # ---------------------------------------------------------------------------
 class TestTranscribeWithSpeakers:
     @patch("audio_transcribe.transcriber.diarize")
-    @patch("audio_transcribe.transcriber._create_model")
-    def test_returns_result_with_speakers(self, mock_model_cls, mock_diarize, tmp_path: Path):
+    @patch("audio_transcribe.transcriber._transcribe_chunked")
+    def test_returns_result_with_speakers(self, mock_chunked, mock_diarize, tmp_path: Path):
+        from audio_transcribe.transcriber import TranscriptionResult
+
         input_wav = tmp_path / "test.wav"
         input_wav.write_bytes(b"fake")
 
-        mock_model = MagicMock()
-        mock_model.generate.return_value = [{"text": "大家好", "timestamp": "0,5000"}]
-        mock_model_cls.return_value = mock_model
+        mock_chunked.return_value = TranscriptionResult(
+            text="大家好",
+            segments=[{"start": 0.0, "end": 5.0, "text": "大家好"}],
+            language="zh",
+            duration=5.0,
+        )
 
         mock_diarize.return_value = [DiarizationSegment(start=0.0, end=5.0, speaker="spk0")]
 
@@ -210,14 +276,19 @@ class TestTranscribeWithSpeakers:
         assert "spk0" in data["speakers"]
 
     @patch("audio_transcribe.transcriber.diarize")
-    @patch("audio_transcribe.transcriber._create_model")
-    def test_diarization_failure_degrades(self, mock_model_cls, mock_diarize, tmp_path: Path):
+    @patch("audio_transcribe.transcriber._transcribe_chunked")
+    def test_diarization_failure_degrades(self, mock_chunked, mock_diarize, tmp_path: Path):
+        from audio_transcribe.transcriber import TranscriptionResult
+
         input_wav = tmp_path / "test.wav"
         input_wav.write_bytes(b"fake")
 
-        mock_model = MagicMock()
-        mock_model.generate.return_value = [{"text": "test", "timestamp": "0,1000"}]
-        mock_model_cls.return_value = mock_model
+        mock_chunked.return_value = TranscriptionResult(
+            text="test",
+            segments=[{"start": 0.0, "end": 1.0, "text": "test"}],
+            language="zh",
+            duration=1.0,
+        )
 
         mock_diarize.return_value = []
 
@@ -227,6 +298,18 @@ class TestTranscribeWithSpeakers:
         assert result is not None
         data = json.loads(output_path.read_text())
         assert data["segments"][0]["speaker"] == "UNKNOWN"
+
+    @patch("audio_transcribe.transcriber._transcribe_chunked")
+    def test_chunked_failure_returns_none(self, mock_chunked, tmp_path: Path):
+        input_wav = tmp_path / "test.wav"
+        input_wav.write_bytes(b"fake")
+
+        mock_chunked.return_value = None
+
+        output_path = tmp_path / "test.json"
+        result = transcribe_with_speakers(input_wav, output_path)
+
+        assert result is None
 
     def test_missing_input_returns_none(self, tmp_path: Path):
         result = transcribe_with_speakers(tmp_path / "missing.wav", tmp_path / "out.json")

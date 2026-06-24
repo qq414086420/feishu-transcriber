@@ -16,6 +16,12 @@ rsync -av --delete \
 
 cp "$SRC/pyproject.toml" "$DST/"
 
+# Copy config directory (summary style templates)
+if [ -d "$SRC/config" ]; then
+    mkdir -p "$DST/config"
+    rsync -av "$SRC/config/" "$DST/config/"
+fi
+
 mkdir -p "$DST"/{data/{inbox,audio,transcripts,summaries},logs}
 
 cd "$DST"
